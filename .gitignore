@@ -1,0 +1,35 @@
+# === Generated data (run prepare_data.py to rebuild) ===
+processed_football_data.csv
+team_elo.json
+team_form.json
+h2h_cache.json
+
+# === Runtime caches (auto-built by the app on first run) ===
+crests_cache.json
+form_cache.json
+standings_cache.json
+leagues_display.json
+
+# === Trained model (run train_model.py to rebuild) ===
+football_model.joblib
+accuracy.txt
+
+# === Database (user accounts — never commit) ===
+project.db
+
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.env
+venv/
+.venv/
+
+# === Claude Code internal config ===
+.claude/
+
+# === OS ===
+.DS_Store
+Thumbs.db
