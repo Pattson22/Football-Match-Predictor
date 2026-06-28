@@ -236,6 +236,47 @@
       <div style="font-size:0.78rem;color:var(--muted);margin-top:10px;">Based on last 10 meetings in training data</div>
     </div>
     {% endif %}
+
+    <!-- Poisson Model -->
+    <div class="section" id="poissonSection">
+      <h3>Poisson Goal Model <span style="font-size:0.7rem;color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(click to load)</span></h3>
+      <button onclick="loadPoisson()" id="poissonBtn"
+        style="padding:8px 16px;border-radius:8px;border:1px solid var(--accent-border);background:rgba(46,160,67,.1);
+               color:#2ea043;font-size:0.82rem;cursor:pointer;">Calculate Correct Scores</button>
+      <div id="poissonResult" style="display:none;margin-top:16px"></div>
+    </div>
   </div>
+
+  <script>
+    async function loadPoisson() {
+      document.getElementById('poissonBtn').textContent = 'Loading…';
+      try {
+        const r = await fetch(`/api/poisson/{{ match.home_team | urlencode }}/{{ match.away_team | urlencode }}`);
+        const d = await r.json();
+        document.getElementById('poissonBtn').style.display = 'none';
+        const res = document.getElementById('poissonResult');
+        res.style.display = 'block';
+        res.innerHTML = `
+          <div style="display:flex;gap:24px;margin-bottom:16px">
+            <div><div style="font-size:1.4rem;font-weight:700;color:#2ea043">${d.ph}%</div><div style="font-size:0.72rem;color:var(--muted)">Home Win</div></div>
+            <div><div style="font-size:1.4rem;font-weight:700;color:#d29922">${d.pd}%</div><div style="font-size:0.72rem;color:var(--muted)">Draw</div></div>
+            <div><div style="font-size:1.4rem;font-weight:700;color:#da3633">${d.pa}%</div><div style="font-size:0.72rem;color:var(--muted)">Away Win</div></div>
+            <div style="margin-left:16px"><div style="font-size:0.82rem;color:var(--muted)">xG: <strong style="color:#e6edf3">${d.lam_h}</strong> – <strong style="color:#e6edf3">${d.lam_a}</strong></div></div>
+          </div>
+          <div style="font-size:0.78rem;color:var(--muted);margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:.05em">Top Correct Scores</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            ${d.top_scores.map(([score, prob]) => `
+              <div style="background:rgba(255,255,255,.04);border:1px solid #30363d;border-radius:8px;padding:8px 14px;text-align:center">
+                <div style="font-size:1rem;font-weight:700">${score}</div>
+                <div style="font-size:0.72rem;color:#8b949e;margin-top:2px">${prob}%</div>
+              </div>`).join('')}
+          </div>
+          <div style="font-size:0.72rem;color:var(--muted);margin-top:12px">Based on team form averages using Poisson distribution</div>
+        `;
+      } catch(e) {
+        document.getElementById('poissonBtn').textContent = 'Error — try again';
+      }
+    }
+  </script>
 </body>
 </html>

@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings · Football Predictor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #09090b;
+      --surface: rgba(255,255,255,0.035); --surface-2: rgba(255,255,255,0.06);
+      --surface-hover: rgba(255,255,255,0.065);
+      --border: rgba(255,255,255,0.08); --border-hover: rgba(255,255,255,0.15);
+      --accent: #00e87b; --accent-dim: rgba(0,232,123,0.09);
+      --away: #ef4444;
+      --text: #fafafa; --text-2: #a1a1aa; --text-3: #52525b;
+      --r-sm: 8px; --r: 12px; --r-lg: 16px; --ease: 0.18s ease;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.03) inset;
+      --shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.04) inset;
+    }
+    html { font-size: 16px; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: var(--bg); color: var(--text); min-height: 100dvh; line-height: 1.6; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+    body::before { content: ''; position: fixed; top: 0; left: 50%; transform: translateX(-50%); width: 1000px; height: 600px; background: radial-gradient(ellipse at 50% 0%, rgba(0,232,123,0.055) 0%, transparent 65%); pointer-events: none; z-index: 0; }
+    a { text-decoration: none; color: inherit; }
+    button { font-family: inherit; cursor: pointer; border: none; background: none; }
+    #bg-canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+
+    /* NAVBAR */
+    .navbar { position: sticky; top: 0; z-index: 100; height: 58px; background: rgba(9,9,11,0.88); backdrop-filter: blur(20px) saturate(180%); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 1.5rem; }
+    .nav-brand { display: flex; align-items: center; gap: 0.55rem; font-size: 0.88rem; font-weight: 700; letter-spacing: -0.03em; color: var(--text); white-space: nowrap; flex-shrink: 0; }
+    .brand-icon { width: 28px; height: 28px; background: linear-gradient(135deg, rgba(0,232,123,0.18), rgba(0,232,123,0.06)); border: 1px solid rgba(0,232,123,0.22); border-radius: var(--r-sm); display: grid; place-items: center; box-shadow: 0 0 14px rgba(0,232,123,0.12); }
+    .nav-center { display: flex; align-items: center; gap: 2px; margin-left: 1.25rem; flex: 1; }
+    .nav-link { padding: 5px 10px; border-radius: var(--r-sm); font-size: 0.78rem; font-weight: 500; color: var(--text-3); transition: color var(--ease), background var(--ease); white-space: nowrap; }
+    .nav-link:hover { color: var(--text-2); background: var(--surface); }
+    .nav-link.active { color: var(--text); background: var(--surface-2); font-weight: 600; }
+    .nav-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    .nav-sep { width: 1px; height: 18px; background: var(--border); margin: 0 4px; }
+    .accuracy-chip { display: inline-flex; align-items: center; gap: 5px; background: var(--accent-dim); border: 1px solid rgba(0,232,123,0.18); color: var(--accent); font-size: 0.68rem; font-weight: 700; padding: 3px 10px; border-radius: 999px; white-space: nowrap; }
+    .live-dot { width: 6px; height: 6px; background: var(--accent); border-radius: 50%; animation: dotPulse 2s ease-in-out infinite; }
+    @keyframes dotPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(0,232,123,0.4); } 50% { box-shadow: 0 0 0 4px rgba(0,232,123,0); } }
+    .nav-email { font-size: 0.7rem; color: var(--text-3); white-space: nowrap; }
+    .btn-logout { display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 1px solid var(--border); color: var(--text-3); font-size: 0.72rem; font-weight: 500; padding: 5px 10px; border-radius: var(--r-sm); transition: all var(--ease); }
+    .btn-logout:hover { border-color: rgba(239,68,68,0.4); color: #f87171; background: rgba(239,68,68,0.06); }
+
+    /* PAGE */
+    .page-content { position: relative; z-index: 1; }
+    .page { max-width: 620px; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
+
+    /* HEADER */
+    .page-header { margin-bottom: 2.25rem; }
+    .page-eyebrow { display: inline-flex; align-items: center; gap: 6px; font-size: 0.62rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); margin-bottom: 0.55rem; }
+    .eyebrow-dot { width: 4px; height: 4px; background: var(--accent); border-radius: 50%; }
+    .page-title { font-size: 2rem; font-weight: 800; letter-spacing: -0.05em; line-height: 1.1; background: linear-gradient(135deg, #ffffff 0%, #e4e4e7 45%, #00e87b 100%); background-size: 200% auto; -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; animation: shimmer 8s linear infinite; }
+    @keyframes shimmer { 0% { background-position: 0% center; } 100% { background-position: 200% center; } }
+    .page-subtitle { font-size: 0.82rem; color: var(--text-3); margin-top: 0.4rem; }
+
+    /* FLASH */
+    .flash { padding: 11px 16px; border-radius: var(--r-sm); margin-bottom: 16px; font-size: 0.84rem; font-weight: 500; }
+    .flash.info  { background: rgba(0,232,123,0.07); border: 1px solid rgba(0,232,123,0.18); color: var(--accent); }
+    .flash.error { background: rgba(239,68,68,0.07); border: 1px solid rgba(239,68,68,0.18); color: #f87171; }
+
+    /* SETTINGS CARD */
+    .settings-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
+      padding: 1.5rem 1.6rem; margin-bottom: 12px;
+      box-shadow: var(--shadow-sm); position: relative; overflow: hidden;
+    }
+    .settings-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.07), transparent); }
+    .card-title { font-size: 0.62rem; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 1.4rem; }
+
+    /* FIELDS */
+    .field { margin-bottom: 1.15rem; }
+    .field:last-of-type { margin-bottom: 0; }
+    .field label { display: block; font-size: 0.72rem; color: var(--text-2); font-weight: 600; margin-bottom: 6px; }
+    .field input[type=number], .field select {
+      width: 100%; padding: 10px 12px; border-radius: var(--r-sm);
+      border: 1px solid var(--border); background: rgba(255,255,255,0.03);
+      color: var(--text); font-size: 0.88rem; font-family: inherit;
+      transition: border-color var(--ease), box-shadow var(--ease);
+    }
+    .field input:focus, .field select:focus { outline: none; border-color: rgba(0,232,123,0.45); box-shadow: 0 0 0 3px rgba(0,232,123,0.08); }
+    .field select option { background: #111113; }
+    .field .hint { font-size: 0.71rem; color: var(--text-3); margin-top: 6px; line-height: 1.5; }
+
+    /* KELLY PREVIEW */
+    .kelly-preview {
+      background: rgba(0,232,123,0.04); border: 1px solid rgba(0,232,123,0.14);
+      border-radius: var(--r-sm); padding: 12px 16px; margin-top: 1.1rem;
+      font-size: 0.8rem; color: var(--text-3); line-height: 1.6;
+    }
+    .kelly-preview strong { color: var(--accent); font-weight: 700; }
+
+    /* TOGGLE ROWS */
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 14px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    .toggle-row:last-child { border-bottom: none; padding-bottom: 0; }
+    .toggle-row:first-child { padding-top: 0; }
+    .toggle-label { font-size: 0.88rem; font-weight: 600; color: var(--text); }
+    .toggle-sub { font-size: 0.72rem; color: var(--text-3); margin-top: 3px; line-height: 1.4; }
+    .toggle { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; inset: 0; border-radius: 22px; background: rgba(255,255,255,0.07); border: 1px solid var(--border); cursor: pointer; transition: background var(--ease), border-color var(--ease); }
+    .slider::before { content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 2px; border-radius: 50%; background: var(--text-3); transition: transform var(--ease), background var(--ease); }
+    .toggle input:checked + .slider { background: rgba(0,232,123,0.25); border-color: rgba(0,232,123,0.45); }
+    .toggle input:checked + .slider::before { transform: translateX(17px); background: var(--accent); }
+
+    /* SAVE BUTTON */
+    .btn-save {
+      width: 100%; padding: 12px; border-radius: var(--r-sm);
+      background: var(--accent); color: #050f07;
+      font-size: 0.9rem; font-weight: 700; letter-spacing: -0.01em; cursor: pointer;
+      transition: opacity var(--ease), box-shadow var(--ease), transform var(--ease);
+      margin-top: 12px;
+    }
+    .btn-save:hover { opacity: 0.9; box-shadow: 0 0 24px rgba(0,232,123,0.28); transform: translateY(-1px); }
+
+    /* SETTLE BUTTON */
+    .btn-settle-now {
+      padding: 10px 20px; border-radius: var(--r-sm);
+      border: 1px solid var(--border); background: var(--surface);
+      color: var(--text-2); font-size: 0.84rem; font-weight: 600; cursor: pointer;
+      transition: all var(--ease);
+    }
+    .btn-settle-now:hover { border-color: rgba(0,232,123,0.3); color: var(--accent); background: rgba(0,232,123,0.05); }
+    .data-desc { font-size: 0.82rem; color: var(--text-3); margin-bottom: 1.1rem; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <canvas id="bg-canvas" aria-hidden="true"></canvas>
+
+  <nav class="navbar">
+    <a href="/dashboard" class="nav-brand">
+      <div class="brand-icon" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#00e87b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="17" cy="4" r="2" fill="#00e87b" stroke="none"/><line x1="17" y1="6" x2="15" y2="11"/><line x1="16" y1="8" x2="20.5" y2="6.5"/><line x1="16" y1="8" x2="13" y2="10.5"/><polyline points="15,11 16,16 18.5,20"/><polyline points="15,11 10,14.5 5.5,11.5"/><circle cx="3.5" cy="11" r="2.5" fill="rgba(0,232,123,0.12)"/></svg>
+      </div>
+      Football Predictor
+    </a>
+    <div class="nav-center">
+      <a href="/dashboard" class="nav-link">Dashboard</a>
+      <a href="/best-bets" class="nav-link">Best Bets</a>
+      <a href="/bets" class="nav-link">Bets</a>
+      <a href="/predictions" class="nav-link">Predictions</a>
+      <a href="/analytics" class="nav-link">Analytics</a>
+      <a href="/settings" class="nav-link active">Settings</a>
+    </div>
+    <div class="nav-right">
+      <div class="nav-sep"></div>
+      <div class="accuracy-chip"><span class="live-dot"></span>{{ model_accuracy }}% accurate</div>
+      <span class="nav-email">{{ user_email }}</span>
+      <a href="{{ url_for('logout') }}" class="btn-logout">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Logout
+      </a>
+    </div>
+  </nav>
+
+  <div class="page-content">
+    <div class="page">
+      <div class="page-header">
+        <div class="page-eyebrow"><span class="eyebrow-dot"></span>Configuration</div>
+        <h1 class="page-title">Settings</h1>
+        <p class="page-subtitle">Bankroll, Kelly staking and notification preferences</p>
+      </div>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endwith %}
+
+      <form method="POST" action="/settings">
+        <div class="settings-card">
+          <div class="card-title">Bankroll &amp; Staking</div>
+          <div class="field">
+            <label>Bankroll (£)</label>
+            <input type="number" name="bankroll" value="{{ s.bankroll }}" min="1" step="10">
+            <div class="hint">Your total betting bank &mdash; used to calculate Kelly stakes</div>
+          </div>
+          <div class="field">
+            <label>Default Stake (£)</label>
+            <input type="number" name="default_stake" value="{{ s.default_stake }}" min="0.5" step="0.5">
+            <div class="hint">Pre-filled in the bet tracker form</div>
+          </div>
+          <div class="field">
+            <label>Kelly Fraction</label>
+            <select name="kelly_fraction">
+              <option value="0.10" {% if s.kelly_fraction == 0.10 %}selected{% endif %}>1/10 Kelly &mdash; Very conservative</option>
+              <option value="0.25" {% if s.kelly_fraction == 0.25 %}selected{% endif %}>1/4 Kelly &mdash; Recommended</option>
+              <option value="0.50" {% if s.kelly_fraction == 0.50 %}selected{% endif %}>1/2 Kelly &mdash; Moderate</option>
+              <option value="1.00" {% if s.kelly_fraction == 1.00 %}selected{% endif %}>Full Kelly &mdash; Aggressive</option>
+            </select>
+            <div class="hint">Fraction of theoretical Kelly stake &mdash; quarter-Kelly is standard for most bettors</div>
+          </div>
+          <div class="kelly-preview" id="kellyPreview">
+            Example: on a value bet with 55% model probability at odds 2.10,
+            <strong id="kellyExample">&mdash;</strong> suggested stake from a £{{ s.bankroll }} bank
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <div class="card-title">Notifications</div>
+          <div class="toggle-row">
+            <div>
+              <div class="toggle-label">Email alerts</div>
+              <div class="toggle-sub">Send email when new value bets are found (requires ALERT_ENABLED=true in .env)</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" name="notify_email" {% if s.notify_email %}checked{% endif %}>
+              <span class="slider"></span>
+            </label>
+          </div>
+          <div class="toggle-row">
+            <div>
+              <div class="toggle-label">Browser notifications</div>
+              <div class="toggle-sub">Pop-up notification in this browser when value bets appear</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" name="notify_browser" {% if s.notify_browser %}checked{% endif %}>
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-save">Save Settings</button>
+      </form>
+
+      <div class="settings-card" style="margin-top: 12px">
+        <div class="card-title">Data</div>
+        <p class="data-desc">Auto-settle runs every hour in the background. Trigger it manually to settle results now.</p>
+        <button class="btn-settle-now" onclick="triggerSettle(this)">Run Auto-settle Now</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function updateKellyPreview() {
+      const bankroll = parseFloat(document.querySelector('[name=bankroll]').value) || 0;
+      const fraction = parseFloat(document.querySelector('[name=kelly_fraction]').value) || 0.25;
+      const p = 0.55, b = 2.10 - 1;
+      const k = Math.max(0, (b * p - (1 - p)) / b);
+      const stake = Math.round(bankroll * k * fraction * 100) / 100;
+      document.getElementById('kellyExample').textContent = stake > 0 ? '£' + stake.toFixed(2) : '£0 (no edge)';
+    }
+    document.querySelector('[name=bankroll]').addEventListener('input', updateKellyPreview);
+    document.querySelector('[name=kelly_fraction]').addEventListener('change', updateKellyPreview);
+    updateKellyPreview();
+
+    function triggerSettle(btn) {
+      btn.disabled = true;
+      btn.textContent = 'Running…';
+      fetch('/settle-now', { method: 'POST' })
+        .then(r => r.json())
+        .then(() => { btn.textContent = 'Started — check back in a minute'; })
+        .catch(() => { btn.disabled = false; btn.textContent = 'Run Auto-settle Now'; });
+    }
+  </script>
+  <script>
+  (function(){
+    const cv=document.getElementById('bg-canvas'),cx=cv.getContext('2d');
+    let W,H,nodes=[];
+    const N=70,D=200;
+    function resize(){W=cv.width=window.innerWidth;H=cv.height=window.innerHeight;}
+    function mkNode(){return{x:Math.random()*W,y:Math.random()*H,vx:(Math.random()-.5)*.35,vy:(Math.random()-.5)*.35,r:Math.random()*2.5+1.2,t:Math.random()*Math.PI*2,ts:.015+Math.random()*.025,blue:Math.random()>.78};}
+    function frame(){
+      cx.clearRect(0,0,W,H);
+      for(let i=0;i<N;i++)for(let j=i+1;j<N;j++){
+        const dx=nodes[i].x-nodes[j].x,dy=nodes[i].y-nodes[j].y,d=Math.hypot(dx,dy);
+        if(d<D){cx.beginPath();cx.moveTo(nodes[i].x,nodes[i].y);cx.lineTo(nodes[j].x,nodes[j].y);cx.strokeStyle=`rgba(0,232,123,${(1-d/D)*.16})`;cx.lineWidth=.6;cx.stroke();}
+      }
+      nodes.forEach(n=>{
+        n.x+=n.vx;n.y+=n.vy;n.t+=n.ts;
+        if(n.x<0||n.x>W)n.vx*=-1;if(n.y<0||n.y>H)n.vy*=-1;
+        const a=.5+.4*Math.sin(n.t);
+        cx.beginPath();cx.arc(n.x,n.y,n.r,0,Math.PI*2);
+        cx.fillStyle=n.blue?`rgba(59,130,246,${a})`:`rgba(0,232,123,${a})`;cx.fill();
+      });
+      requestAnimationFrame(frame);
+    }
+    resize();nodes=Array.from({length:N},mkNode);frame();
+    window.addEventListener('resize',()=>{resize();nodes=Array.from({length:N},mkNode);});
+  })();
+  </script>
+</body>
+</html>

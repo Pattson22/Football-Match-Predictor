@@ -1,0 +1,86 @@
+Loaded 50923 rows.
+Features (35): ['avg_H', 'avg_D', 'avg_A', 'imp_H', 'imp_D', 'imp_A', 'home_elo', 'away_elo', 'elo_diff', 'home_form_pts', 'home_gspg', 'home_gcpg', 'away_form_pts', 'away_gspg', 'away_gcpg', 'home_venue_form_pts', 'home_venue_gspg', 'home_venue_gcpg', 'away_venue_form_pts', 'away_venue_gspg', 'away_venue_gcpg', 'home_season_ppg', 'home_season_gd', 'away_season_ppg', 'away_season_gd', 'form_pts_diff', 'season_ppg_diff', 'home_attack_vs_away_def', 'away_attack_vs_home_def', 'home_momentum', 'away_momentum', 'home_rest_days', 'away_rest_days', 'h2h_home_win_rate', 'h2h_draw_rate']
+Train: 40738  Test: 10185
+
+==================================================
+Baseline: GradientBoosting
+==================================================
+Test accuracy: 47.71%
+
+==================================================
+XGBoost — RandomizedSearchCV (50 iterations, 5-fold CV)
+==================================================
+Fitting 5 folds for each of 50 candidates, totalling 250 fits
+
+Best CV score: 46.31%
+Best params:
+  colsample_bytree       1.0
+  gamma                  1.0
+  learning_rate          0.1
+  max_depth              4
+  min_child_weight       3
+  n_estimators           500
+  reg_alpha              0.5
+  reg_lambda             1.0
+  subsample              1.0
+
+Test accuracy: 48.19%
+
+Per-class breakdown:
+              precision    recall  f1-score   support
+
+    Home Win      0.623     0.527     0.571      4617
+        Draw      0.315     0.377     0.343      2666
+    Away Win      0.475     0.507     0.490      2902
+
+    accuracy                          0.482     10185
+   macro avg      0.471     0.470     0.468     10185
+weighted avg      0.500     0.482     0.488     10185
+
+==================================================
+GradientBoosting: 47.71%
+XGBoost (tuned):  48.19%
+Winner: XGBoost  (48.19%)
+==================================================
+
+Feature importances:
+  imp_A                  0.250  ############
+  imp_H                  0.151  #######
+  avg_H                  0.104  #####
+  avg_A                  0.086  ####
+  imp_D                  0.045  ##
+  avg_D                  0.022  #
+  home_rest_days         0.016  
+  h2h_home_win_rate      0.014  
+  home_form_pts          0.014  
+  away_rest_days         0.013  
+  away_venue_form_pts    0.013  
+  season_ppg_diff        0.013  
+  home_momentum          0.013  
+  home_elo               0.013  
+  elo_diff               0.012  
+  away_season_ppg        0.012  
+  away_momentum          0.012  
+  h2h_draw_rate          0.012  
+  away_venue_gspg        0.012  
+  away_gspg              0.011  
+  home_season_ppg        0.011  
+  home_attack_vs_away_def 0.011  
+  away_elo               0.011  
+  away_form_pts          0.011  
+  home_venue_gspg        0.011  
+  away_venue_gcpg        0.011  
+  form_pts_diff          0.011  
+  home_venue_gcpg        0.011  
+  away_gcpg              0.011  
+  home_season_gd         0.011  
+  home_venue_form_pts    0.010  
+  away_season_gd         0.010  
+  away_attack_vs_home_def 0.010  
+  home_gcpg              0.010  
+  home_gspg              0.009  
+
+Running 5-fold CV on winner...
+CV Accuracy: 51.35% (+/- 1.10%)
+
+Saved XGBoost model (48.19%) to football_model.joblib

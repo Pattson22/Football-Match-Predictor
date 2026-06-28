@@ -9,7 +9,14 @@ import requests
 import os
 import json
 import time
-from datetime import datetime, timezone
+import threading
+import smtplib
+import math
+import csv
+import io
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from datetime import datetime, timezone, timedelta
 
 load_dotenv()
 
@@ -58,6 +65,27 @@ class PredictionLog(db.Model):
     pred_label = db.Column(db.String(1))    # H, D, A
     pred_prob  = db.Column(db.Integer)      # 0-100
     actual     = db.Column(db.String(1), nullable=True)
+
+
+class OddsSnapshot(db.Model):
+    id         = db.Column(db.Integer, primary_key=True)
+    match_date = db.Column(db.String(10))
+    home_team  = db.Column(db.String(80))
+    away_team  = db.Column(db.String(80))
+    odds_h     = db.Column(db.Float)
+    odds_d     = db.Column(db.Float)
+    odds_a     = db.Column(db.Float)
+    fetched_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class UserSettings(db.Model):
+    id             = db.Column(db.Integer, primary_key=True)
+    user_id        = db.Column(db.Integer, db.ForeignKey('user.id'), unique=True, nullable=False)
+    bankroll       = db.Column(db.Float, default=1000.0)
+    default_stake  = db.Column(db.Float, default=10.0)
+    kelly_fraction = db.Column(db.Float, default=0.25)
+    notify_email   = db.Column(db.Boolean, default=True)
+    notify_browser = db.Column(db.Boolean, default=True)
 
 
 @login_manager.user_loader
@@ -153,6 +181,212 @@ LOGO_MAP = {
     'West Ham': 'whufc.com', 'Wolverhampton Wanderers': 'wolves.co.uk', 'Wolves': 'wolves.co.uk',
     'Burnley': 'burnleyfootballclub.com', 'Ipswich Town': 'itfc.co.uk',
 }
+
+
+# --- Alert Config ---
+ALERT_ENABLED      = os.environ.get('ALERT_ENABLED', 'false').lower() == 'true'
+ALERT_EMAIL        = os.environ.get('ALERT_EMAIL', '')
+GMAIL_APP_PASSWORD = os.environ.get('GMAIL_APP_PASSWORD', '')
+_alerted_bets: set = set()  # tracks bet keys already emailed this session
+
+
+# --- Poisson / Kelly helpers ---
+def poisson_pmf(k: int, lam: float) -> float:
+    if lam <= 0 or k < 0:
+        return 0.0
+    return math.exp(-lam) * (lam ** k) / math.factorial(k)
+
+
+def poisson_predict(home_team: str, away_team: str) -> dict:
+    home_dn = normalise(home_team)
+    away_dn = normalise(away_team)
+    hf = team_form.get(home_dn) or team_form.get(home_team) or {}
+    af = team_form.get(away_dn) or team_form.get(away_team) or {}
+    avg = 1.35
+    lam_h = max(0.3, hf.get('gspg', avg) / avg * af.get('gcpg', avg) / avg * avg * 1.10)
+    lam_a = max(0.3, af.get('gspg', avg) / avg * hf.get('gcpg', avg) / avg * avg)
+    ph = pd_ = pa = 0.0
+    scores: dict = {}
+    for h in range(7):
+        for a in range(7):
+            p = poisson_pmf(h, lam_h) * poisson_pmf(a, lam_a)
+            scores[f"{h}-{a}"] = round(p * 100, 1)
+            if h > a:   ph  += p
+            elif h == a: pd_ += p
+            else:        pa  += p
+    top = sorted(scores.items(), key=lambda x: -x[1])[:8]
+    return {'ph': round(ph*100,1), 'pd': round(pd_*100,1), 'pa': round(pa*100,1),
+            'lam_h': round(lam_h,2), 'lam_a': round(lam_a,2), 'top_scores': top}
+
+
+def kelly_stake(model_prob_pct: float, odds: float, bankroll: float, fraction: float = 0.25) -> float:
+    p = model_prob_pct / 100
+    b = odds - 1
+    if b <= 0:
+        return 0.0
+    k = (b * p - (1 - p)) / b
+    return round(max(0.0, bankroll * k * fraction), 2)
+
+
+def get_user_settings() -> UserSettings:
+    s = UserSettings.query.filter_by(user_id=current_user.id).first()
+    if not s:
+        s = UserSettings(user_id=current_user.id)
+        db.session.add(s)
+        db.session.commit()
+    return s
+
+
+def _send_value_bet_email(value_bets: list) -> None:
+    if not ALERT_EMAIL or not GMAIL_APP_PASSWORD or GMAIL_APP_PASSWORD.startswith('your_'):
+        print("Email alerts not configured — skipping send.")
+        return
+    rows = ''.join(
+        f"""<tr>
+          <td style="padding:10px 12px;border-bottom:1px solid #30363d">
+            <strong>{vb['match']['home_team']} vs {vb['match']['away_team']}</strong><br>
+            <span style="color:#8b949e;font-size:12px">{vb['match']['league']} · {vb['match']['kickoff']}</span>
+          </td>
+          <td style="padding:10px 12px;border-bottom:1px solid #30363d;color:#2ea043;font-weight:700">
+            {vb['label_text']}
+          </td>
+          <td style="padding:10px 12px;border-bottom:1px solid #30363d;text-align:center">{vb['odds']}</td>
+          <td style="padding:10px 12px;border-bottom:1px solid #30363d;text-align:center">{vb['model_prob']}%</td>
+          <td style="padding:10px 12px;border-bottom:1px solid #30363d;text-align:center;color:#2ea043;font-weight:700">
+            +{vb['ev']}%
+          </td>
+        </tr>"""
+        for vb in value_bets
+    )
+    html = f"""<html><body style="background:#0d1117;color:#e6edf3;font-family:Inter,sans-serif;padding:24px">
+      <h2 style="color:#e6edf3;margin-bottom:4px">⚽ {len(value_bets)} Value Bet{'s' if len(value_bets)!=1 else ''} Found</h2>
+      <p style="color:#8b949e;margin-bottom:20px;font-size:14px">Football Predictor · {datetime.now(timezone.utc).strftime('%d %b %Y %H:%M UTC')}</p>
+      <table style="width:100%;border-collapse:collapse;background:#161b22;border-radius:8px;overflow:hidden">
+        <thead>
+          <tr style="background:#21262d">
+            <th style="padding:10px 12px;text-align:left;font-size:12px;color:#8b949e">Match</th>
+            <th style="padding:10px 12px;text-align:left;font-size:12px;color:#8b949e">Bet</th>
+            <th style="padding:10px 12px;text-align:center;font-size:12px;color:#8b949e">Odds</th>
+            <th style="padding:10px 12px;text-align:center;font-size:12px;color:#8b949e">Model %</th>
+            <th style="padding:10px 12px;text-align:center;font-size:12px;color:#8b949e">EV</th>
+          </tr>
+        </thead>
+        <tbody>{rows}</tbody>
+      </table>
+      <p style="color:#8b949e;font-size:12px;margin-top:16px">Visit <a href="http://127.0.0.1:5000/best-bets" style="color:#2ea043">Football Predictor</a> to log bets.</p>
+    </body></html>"""
+
+    msg = MIMEMultipart('alternative')
+    msg['Subject'] = f"⚽ {len(value_bets)} Value Bet{'s' if len(value_bets)!=1 else ''} — Football Predictor"
+    msg['From']    = ALERT_EMAIL
+    msg['To']      = ALERT_EMAIL
+    msg.attach(MIMEText(html, 'html'))
+    try:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10) as smtp:
+            smtp.login(ALERT_EMAIL, GMAIL_APP_PASSWORD)
+            smtp.send_message(msg)
+        print(f"Value bet alert sent → {ALERT_EMAIL} ({len(value_bets)} bets)")
+    except Exception as e:
+        print(f"Email alert failed: {e}")
+
+
+def _alert_worker() -> None:
+    time.sleep(60)  # wait for first dashboard load before starting checks
+    while True:
+        time.sleep(30 * 60)
+        if not _matches_cache:
+            continue
+        new_bets = []
+        for m in _matches_cache.values():
+            p = m.get('pred')
+            if not p:
+                continue
+            for outcome, label in [('val_h', 'H'), ('val_d', 'D'), ('val_a', 'A')]:
+                if not p.get(outcome):
+                    continue
+                key = f"{m['home_team']}||{m['away_team']}||{label}"
+                if key in _alerted_bets:
+                    continue
+                _alerted_bets.add(key)
+                odds_map = {'H': 'b365h', 'D': 'b365d', 'A': 'b365a'}
+                prob_map = {'H': 'h',     'D': 'd',     'A': 'a'}
+                ev_map   = {'H': 'ev_h',  'D': 'ev_d',  'A': 'ev_a'}
+                new_bets.append({
+                    'match':      m,
+                    'outcome':    label,
+                    'label_text': {'H': 'Home Win', 'D': 'Draw', 'A': 'Away Win'}[label],
+                    'odds':       m[odds_map[label]],
+                    'model_prob': p[prob_map[label]],
+                    'ev':         p[ev_map[label]],
+                })
+        if new_bets:
+            _send_value_bet_email(new_bets)
+
+
+if ALERT_ENABLED:
+    threading.Thread(target=_alert_worker, daemon=True).start()
+    print("Email alert worker started.")
+
+
+# --- Auto-settle ---
+def _result_from_winner(winner: str) -> str | None:
+    if winner == 'HOME_TEAM': return 'H'
+    if winner == 'AWAY_TEAM': return 'A'
+    if winner == 'DRAW':      return 'D'
+    return None
+
+
+def _name_set(fd_team: dict) -> set:
+    short = fd_team.get('shortName', '')
+    full  = fd_team.get('name', '')
+    stripped = full[:-3] if full.endswith(' FC') else full
+    return {n for n in (short, full, stripped, normalise(short), normalise(full)) if n}
+
+
+def auto_settle() -> None:
+    from datetime import date
+    date_from = (date.today() - timedelta(days=7)).isoformat()
+    date_to   = date.today().isoformat()
+    with app.app_context():
+        for _, comp_code in LEAGUES:
+            try:
+                resp = requests.get(
+                    f'https://api.football-data.org/v4/competitions/{comp_code}/matches',
+                    params={'status': 'FINISHED', 'dateFrom': date_from, 'dateTo': date_to},
+                    headers={'X-Auth-Token': FOOTBALL_DATA_API_KEY},
+                    timeout=8,
+                )
+                resp.raise_for_status()
+                for m in resp.json().get('matches', []):
+                    result = _result_from_winner(m.get('score', {}).get('winner'))
+                    if not result:
+                        continue
+                    match_date  = m.get('utcDate', '')[:10]
+                    home_names  = _name_set(m.get('homeTeam', {}))
+                    away_names  = _name_set(m.get('awayTeam', {}))
+                    # Settle prediction logs
+                    for pred in PredictionLog.query.filter_by(actual=None, match_date=match_date).all():
+                        if normalise(pred.home_team) in home_names and normalise(pred.away_team) in away_names:
+                            pred.actual = result
+                    # Settle bets
+                    for bet in Bet.query.filter_by(status='P', match_date=match_date).all():
+                        if normalise(bet.home_team) in home_names and normalise(bet.away_team) in away_names:
+                            bet.status = 'W' if bet.bet_on == result else 'L'
+                            bet.pnl    = round(bet.stake * bet.odds - bet.stake, 2) if bet.status == 'W' else -bet.stake
+                db.session.commit()
+                print(f"Auto-settle: processed {comp_code}")
+            except Exception as e:
+                print(f"Auto-settle error ({comp_code}): {e}")
+            time.sleep(7)
+
+
+def _auto_settle_worker() -> None:
+    time.sleep(120)
+    while True:
+        auto_settle()
+        time.sleep(3600)
+
+threading.Thread(target=_auto_settle_worker, daemon=True).start()
 
 
 # --- Load Model & Static Artifacts ---
@@ -635,6 +869,15 @@ def dashboard():
     upcoming_matches, api_error = [], None
     standings = fetch_standings()
 
+    # Load previous odds snapshots for movement detection (most recent per match, >5 min old)
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
+    prev_snaps = OddsSnapshot.query.filter(OddsSnapshot.fetched_at < cutoff).all()
+    prev_odds_map: dict = {}
+    for s in prev_snaps:
+        key = f"{s.home_team}||{s.away_team}||{s.match_date}"
+        if key not in prev_odds_map or s.fetched_at > prev_odds_map[key]['ts']:
+            prev_odds_map[key] = {'h': s.odds_h, 'd': s.odds_d, 'a': s.odds_a, 'ts': s.fetched_at}
+
     try:
         api_data = []
         for sport_key, _ in LEAGUES:
@@ -671,6 +914,15 @@ def dashboard():
             hf = get_team_features(home_team, standings, is_home=True)
             af = get_team_features(away_team, standings, is_home=False)
 
+            match_date_str = game.get('commence_time', '')[:10]
+            snap_key = f"{home_team}||{away_team}||{match_date_str}"
+            prev = prev_odds_map.get(snap_key)
+            def _mv(curr, old): return 'up' if curr > old + 0.04 else ('down' if curr < old - 0.04 else 'flat')
+            odds_move = {'h': _mv(avg_H, prev['h']), 'd': _mv(avg_D, prev['d']), 'a': _mv(avg_A, prev['a'])} \
+                        if prev else {'h': 'flat', 'd': 'flat', 'a': 'flat'}
+            db.session.add(OddsSnapshot(match_date=match_date_str, home_team=home_team, away_team=away_team,
+                                        odds_h=avg_H, odds_d=avg_D, odds_a=avg_A))
+
             upcoming_matches.append({
                 "league":        game.get('sport_title'),
                 "date":          game.get('commence_time', '')[:10],
@@ -685,7 +937,15 @@ def dashboard():
                 "features": _build_features(avg_H, avg_D, avg_A, hf, af, home_team, away_team),
                 "home_features": hf,
                 "away_features": af,
+                "odds_move": odds_move,
             })
+
+        # Commit snapshots and purge those older than 7 days
+        db.session.commit()
+        OddsSnapshot.query.filter(
+            OddsSnapshot.fetched_at < datetime.now(timezone.utc) - timedelta(days=7)
+        ).delete()
+        db.session.commit()
 
     except requests.exceptions.RequestException as e:
         api_error = f"Error fetching odds: {e}"
@@ -783,10 +1043,14 @@ def best_bets():
                     'ev':         p[ev_key],
                 })
     value_bets.sort(key=lambda x: x['ev'], reverse=True)
+    settings = get_user_settings()
+    for vb in value_bets:
+        vb['kelly'] = kelly_stake(vb['model_prob'], vb['odds'], settings.bankroll, settings.kelly_fraction)
     return render_template('best_bets.html',
                            value_bets=value_bets,
                            user_email=current_user.email,
-                           model_accuracy=model_accuracy)
+                           model_accuracy=model_accuracy,
+                           settings=settings)
 
 
 # --- Match Detail ---
@@ -920,6 +1184,49 @@ def predictions_settle(log_id):
     return redirect(url_for('predictions'))
 
 
+# --- API: value bets (polled by browser notification JS) ---
+@app.route('/api/value-bets')
+@login_required
+def api_value_bets():
+    bets = []
+    for m in _matches_cache.values():
+        p = m.get('pred')
+        if not p:
+            continue
+        for outcome, label in [('val_h', 'H'), ('val_d', 'D'), ('val_a', 'A')]:
+            if p.get(outcome):
+                odds_map = {'H': 'b365h', 'D': 'b365d', 'A': 'b365a'}
+                prob_map = {'H': 'h',     'D': 'd',     'A': 'a'}
+                ev_map   = {'H': 'ev_h',  'D': 'ev_d',  'A': 'ev_a'}
+                bets.append({
+                    'match':      f"{m['home_team']} vs {m['away_team']}",
+                    'league':     m['league'],
+                    'outcome':    {'H': 'Home Win', 'D': 'Draw', 'A': 'Away Win'}[label],
+                    'odds':       m[odds_map[label]],
+                    'model_prob': p[prob_map[label]],
+                    'ev':         p[ev_map[label]],
+                })
+    bets.sort(key=lambda x: x['ev'], reverse=True)
+    return jsonify(bets)
+
+
+# --- Reload model from disk (call after overnight training completes) ---
+@app.route('/reload-model', methods=['POST'])
+@login_required
+def reload_model():
+    global model, model_features, model_accuracy
+    try:
+        _md = joblib.load('football_model.joblib')
+        model          = _md['model']
+        model_features = _md['features']
+        with open('accuracy.txt') as f:
+            model_accuracy = f.read().strip()
+        print(f"Model hot-reloaded — accuracy: {model_accuracy}%")
+        return jsonify({'status': 'ok', 'accuracy': model_accuracy})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 # --- Predict (AJAX fallback) ---
 @app.route('/predict', methods=['POST'])
 @login_required
@@ -936,6 +1243,151 @@ def predict_match():
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 400
+
+
+# --- Analytics ---
+@app.route('/analytics')
+@login_required
+def analytics():
+    from collections import defaultdict
+    logs  = PredictionLog.query.filter_by(user_id=current_user.id).order_by(PredictionLog.logged_at).all()
+    bets  = Bet.query.filter_by(user_id=current_user.id).filter(Bet.status != 'P').order_by(Bet.created_at).all()
+    settled = [l for l in logs if l.actual is not None]
+
+    # Accuracy over time (weekly)
+    weekly: dict = defaultdict(lambda: {'c': 0, 't': 0})
+    for l in settled:
+        w = l.logged_at.strftime('%Y-W%V')
+        weekly[w]['t'] += 1
+        if l.pred_label == l.actual: weekly[w]['c'] += 1
+    weeks     = sorted(weekly)
+    weekly_acc = [round(weekly[w]['c']/weekly[w]['t']*100,1) if weekly[w]['t'] else 0 for w in weeks]
+
+    # By league
+    by_league: dict = defaultdict(lambda: {'c': 0, 't': 0})
+    for l in settled:
+        lg = (l.league or 'Unknown').split(' –')[0]
+        by_league[lg]['t'] += 1
+        if l.pred_label == l.actual: by_league[lg]['c'] += 1
+    lg_names  = sorted(by_league)
+    lg_acc    = [round(by_league[lg]['c']/by_league[lg]['t']*100,1) if by_league[lg]['t'] else 0 for lg in lg_names]
+    lg_counts = [by_league[lg]['t'] for lg in lg_names]
+
+    # By confidence level
+    conf: dict = {'HIGH': {'c':0,'t':0}, 'MED': {'c':0,'t':0}, 'LOW': {'c':0,'t':0}}
+    for l in settled:
+        lv = 'HIGH' if l.pred_prob >= 60 else ('MED' if l.pred_prob >= 45 else 'LOW')
+        conf[lv]['t'] += 1
+        if l.pred_label == l.actual: conf[lv]['c'] += 1
+    conf_labels = ['HIGH (≥60%)', 'MED (45–60%)', 'LOW (<45%)']
+    conf_acc    = [round(conf[k]['c']/conf[k]['t']*100,1) if conf[k]['t'] else 0 for k in ('HIGH','MED','LOW')]
+    conf_counts = [conf[k]['t'] for k in ('HIGH','MED','LOW')]
+
+    # Calibration (10-pp buckets)
+    cal: dict = defaultdict(lambda: {'c': 0, 't': 0})
+    for l in settled:
+        b = (l.pred_prob // 10) * 10
+        cal[b]['t'] += 1
+        if l.pred_label == l.actual: cal[b]['c'] += 1
+    cal_keys    = sorted(cal)
+    cal_labels  = [f"{b}–{b+10}%" for b in cal_keys]
+    cal_pred    = [b + 5 for b in cal_keys]
+    cal_actual  = [round(cal[b]['c']/cal[b]['t']*100,1) if cal[b]['t'] else 0 for b in cal_keys]
+
+    # ROI curve
+    roi_labels, roi_vals = [], []
+    cumulative = 0.0
+    for bet in bets:
+        cumulative += bet.pnl
+        roi_labels.append(bet.match_date or '')
+        roi_vals.append(round(cumulative, 2))
+
+    total_acc = round(sum(1 for l in settled if l.pred_label==l.actual)/len(settled)*100,1) if settled else None
+    total_pnl = round(sum(b.pnl for b in bets), 2)
+    settings  = get_user_settings()
+
+    return render_template('analytics.html',
+        user_email=current_user.email, model_accuracy=model_accuracy,
+        total_predictions=len(logs), settled_count=len(settled), total_acc=total_acc,
+        total_bets=len(bets), total_pnl=total_pnl,
+        weeks=json.dumps(weeks), weekly_acc=json.dumps(weekly_acc),
+        lg_names=json.dumps(lg_names), lg_acc=json.dumps(lg_acc), lg_counts=json.dumps(lg_counts),
+        conf_labels=json.dumps(conf_labels), conf_acc=json.dumps(conf_acc), conf_counts=json.dumps(conf_counts),
+        cal_labels=json.dumps(cal_labels), cal_pred=json.dumps(cal_pred), cal_actual=json.dumps(cal_actual),
+        roi_labels=json.dumps(roi_labels), roi_vals=json.dumps(roi_vals),
+    )
+
+
+# --- Settings ---
+@app.route('/settings', methods=['GET', 'POST'])
+@login_required
+def settings():
+    s = get_user_settings()
+    if request.method == 'POST':
+        try:
+            s.bankroll       = float(request.form.get('bankroll', 1000))
+            s.default_stake  = float(request.form.get('default_stake', 10))
+            s.kelly_fraction = float(request.form.get('kelly_fraction', 0.25))
+            s.notify_email   = 'notify_email'   in request.form
+            s.notify_browser = 'notify_browser' in request.form
+            db.session.commit()
+            flash('Settings saved.', 'info')
+        except Exception as e:
+            flash(f'Error saving settings: {e}', 'error')
+        return redirect(url_for('settings'))
+    return render_template('settings.html',
+        s=s, user_email=current_user.email, model_accuracy=model_accuracy)
+
+
+# --- Export ---
+@app.route('/bets/export')
+@login_required
+def bets_export():
+    bets = Bet.query.filter_by(user_id=current_user.id).order_by(Bet.created_at.desc()).all()
+    buf = io.StringIO()
+    w   = csv.writer(buf)
+    w.writerow(['Date','Home','Away','League','Bet On','Odds','Stake','Status','P&L','Logged At'])
+    for b in bets:
+        w.writerow([b.match_date, b.home_team, b.away_team, b.league,
+                    {'H':'Home Win','D':'Draw','A':'Away Win'}.get(b.bet_on,''),
+                    b.odds, b.stake, {'P':'Pending','W':'Win','L':'Loss','V':'Void'}.get(b.status,''),
+                    b.pnl, b.created_at.strftime('%Y-%m-%d %H:%M')])
+    from flask import Response
+    return Response(buf.getvalue(), mimetype='text/csv',
+                    headers={'Content-Disposition': 'attachment; filename=bets.csv'})
+
+
+@app.route('/predictions/export')
+@login_required
+def predictions_export():
+    logs = PredictionLog.query.filter_by(user_id=current_user.id).order_by(PredictionLog.logged_at.desc()).all()
+    buf = io.StringIO()
+    w   = csv.writer(buf)
+    w.writerow(['Date','Home','Away','League','Prediction','Confidence %','Actual','Correct','Logged At'])
+    for l in logs:
+        correct = '' if l.actual is None else ('Yes' if l.pred_label == l.actual else 'No')
+        w.writerow([l.match_date, l.home_team, l.away_team, l.league,
+                    {'H':'Home Win','D':'Draw','A':'Away Win'}.get(l.pred_label,''),
+                    l.pred_prob, {'H':'Home Win','D':'Draw','A':'Away Win'}.get(l.actual,'') if l.actual else '',
+                    correct, l.logged_at.strftime('%Y-%m-%d %H:%M')])
+    from flask import Response
+    return Response(buf.getvalue(), mimetype='text/csv',
+                    headers={'Content-Disposition': 'attachment; filename=predictions.csv'})
+
+
+# --- Poisson API ---
+@app.route('/api/poisson/<path:home>/<path:away>')
+@login_required
+def api_poisson(home, away):
+    return jsonify(poisson_predict(home, away))
+
+
+# --- Auto-settle trigger (manual) ---
+@app.route('/settle-now', methods=['POST'])
+@login_required
+def settle_now():
+    threading.Thread(target=auto_settle, daemon=True).start()
+    return jsonify({'status': 'started'})
 
 
 # --- Main ---
