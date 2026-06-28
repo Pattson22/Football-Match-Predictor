@@ -656,6 +656,9 @@
             Football Predictor
         </div>
         <div class="nav-right">
+            <a href="/best-bets" class="btn-logout" style="color:var(--text-2)">Best Bets</a>
+            <a href="/bets" class="btn-logout" style="color:var(--text-2)">Bets</a>
+            <a href="/predictions" class="btn-logout" style="color:var(--text-2)">Predictions</a>
             <div class="accuracy-chip">
                 <span class="live-dot" aria-hidden="true"></span>
                 Model {{ model_accuracy }}% accurate
@@ -822,6 +825,9 @@
                             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg>
                             <span>Predict</span>
                         </button>
+                        <a href="/match/{{ match.home_team | urlencode }}/{{ match.away_team | urlencode }}"
+                           style="font-size:0.7rem;color:var(--text-3);flex-shrink:0;padding:0 4px;line-height:32px"
+                           title="Match detail">↗</a>
                     </div>
 
                     <!-- Prediction panel -->
@@ -1223,6 +1229,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const defaultDate = ALL_DATES.includes(todayUTC) ? todayUTC : ALL_DATES[0];
     if (defaultDate) selectDate(defaultDate);
 });
+
+// Auto-refresh page every 30 minutes so odds stay current
+setTimeout(() => location.reload(), 30 * 60 * 1000);
 </script>
 
 </body>

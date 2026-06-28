@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ match.home_team }} vs {{ match.away_team }} · Football Predictor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0d1117; --surface: #161b22; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e; --accent: #238636;
+      --accent-border: #2ea043; --danger: #da3633; --warn: #d29922;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    .topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 24px;
+              background: var(--surface); border-bottom: 1px solid var(--border); }
+    .topbar-left { display: flex; align-items: center; gap: 20px; }
+    .topbar h1 { font-size: 1rem; font-weight: 700; }
+    .nav-links { display: flex; gap: 12px; }
+    .nav-link { font-size: 0.8rem; color: var(--muted); text-decoration: none; padding: 5px 10px;
+                border-radius: 6px; transition: background .2s; }
+    .nav-link:hover { background: rgba(255,255,255,.07); color: var(--text); }
+    .topbar-right { font-size: 0.78rem; color: var(--muted); }
+
+    .page { max-width: 900px; margin: 0 auto; padding: 32px 16px; }
+
+    /* Match header */
+    .match-header { background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+                    padding: 28px; margin-bottom: 24px; text-align: center; }
+    .match-teams { display: flex; align-items: center; justify-content: center; gap: 24px; }
+    .team-block { display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 120px; }
+    .team-logo { width: 56px; height: 56px; object-fit: contain; border-radius: 50%; background: rgba(255,255,255,.05); padding: 4px; }
+    .team-name { font-size: 1rem; font-weight: 700; text-align: center; }
+    .vs { font-size: 1.3rem; color: var(--muted); font-weight: 300; }
+    .match-meta { font-size: 0.82rem; color: var(--muted); margin-top: 14px; }
+
+    /* Prediction summary */
+    .pred-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
+    .pred-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+                 padding: 16px 20px; text-align: center; }
+    .pred-card.winner { border-color: var(--accent-border); background: rgba(35,134,54,.06); }
+    .pred-card .outcome { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; color: var(--muted);
+                           letter-spacing: .06em; margin-bottom: 8px; }
+    .pred-card .prob { font-size: 1.8rem; font-weight: 700; }
+    .pred-card .mkt { font-size: 0.78rem; color: var(--muted); margin-top: 4px; }
+    .pred-card .odds-val { font-size: 1rem; font-weight: 600; margin-top: 4px; }
+    .ev-badge { display: inline-block; padding: 3px 8px; border-radius: 20px; font-size: 0.75rem;
+                font-weight: 600; margin-top: 6px; }
+    .ev-pos { background: rgba(46,160,67,.1); color: var(--accent-border); border: 1px solid rgba(46,160,67,.3); }
+    .ev-neg { background: rgba(218,54,51,.08); color: var(--danger); border: 1px solid rgba(218,54,51,.3); }
+    .val-flag { display: inline-block; margin-top: 6px; font-size: 0.7rem; background: rgba(46,160,67,.15);
+                color: var(--accent-border); border: 1px solid rgba(46,160,67,.4); padding: 2px 8px;
+                border-radius: 20px; font-weight: 600; }
+
+    /* Sections */
+    .section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+                padding: 20px 24px; margin-bottom: 16px; }
+    .section h3 { font-size: 0.9rem; font-weight: 700; margin-bottom: 16px; color: var(--muted);
+                  text-transform: uppercase; letter-spacing: .06em; }
+
+    /* Feature comparison bars */
+    .feat-row { display: grid; grid-template-columns: 1fr 180px 1fr; gap: 8px; align-items: center;
+                margin-bottom: 8px; }
+    .feat-row .lbl { font-size: 0.78rem; color: var(--muted); text-align: center; }
+    .feat-bar { height: 6px; border-radius: 3px; }
+    .bar-home { background: #2ea043; border-radius: 3px 0 0 3px; }
+    .bar-away { background: #da3633; border-radius: 0 3px 3px 0; }
+    .feat-val { font-size: 0.85rem; font-weight: 600; }
+    .feat-val-home { text-align: right; }
+    .feat-val-away { text-align: left; }
+
+    .feat-table { width: 100%; border-collapse: collapse; }
+    .feat-table th { font-size: 0.72rem; color: var(--muted); font-weight: 600; padding: 6px 10px;
+                     border-bottom: 1px solid var(--border); text-align: left; }
+    .feat-table td { font-size: 0.83rem; padding: 7px 10px; border-bottom: 1px solid rgba(255,255,255,.04); }
+    .feat-table tr:last-child td { border-bottom: none; }
+    .feat-table .num { font-weight: 600; text-align: right; }
+    .feat-table .home-better { color: #2ea043; }
+    .feat-table .away-better { color: #da3633; }
+    .feat-table .neutral { color: var(--muted); }
+
+    /* Confidence */
+    .conf-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 0.8rem;
+                  font-weight: 700; letter-spacing: .03em; }
+    .conf-HIGH { background: rgba(46,160,67,.15); color: #2ea043; border: 1px solid rgba(46,160,67,.4); }
+    .conf-MED  { background: rgba(210,153,34,.12); color: #d29922; border: 1px solid rgba(210,153,34,.4); }
+    .conf-LOW  { background: rgba(139,148,158,.1); color: var(--muted); border: 1px solid rgba(139,148,158,.3); }
+
+    .back-link { color: var(--muted); text-decoration: none; font-size: 0.82rem; display: inline-flex;
+                 align-items: center; gap: 6px; margin-bottom: 20px; }
+    .back-link:hover { color: var(--text); }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1>⚽ Football Predictor</h1>
+      <nav class="nav-links">
+        <a href="/dashboard" class="nav-link">Dashboard</a>
+        <a href="/best-bets" class="nav-link">Best Bets</a>
+        <a href="/bets" class="nav-link">Bet Tracker</a>
+        <a href="/predictions" class="nav-link">Predictions</a>
+      </nav>
+    </div>
+    <div class="topbar-right">{{ user_email }} · Model {{ model_accuracy }}% CV</div>
+  </div>
+
+  <div class="page">
+    <a href="/dashboard" class="back-link">← Back to Dashboard</a>
+
+    <!-- Match Header -->
+    <div class="match-header">
+      <div class="match-teams">
+        <div class="team-block">
+          <img class="team-logo" src="{{ match.home_logo_url }}" alt="{{ match.home_team }}" onerror="this.src='https://upload.wikimedia.org/wikipedia/commons/d/d3/Soccerball.svg'">
+          <div class="team-name">{{ match.home_team }}</div>
+        </div>
+        <div class="vs">vs</div>
+        <div class="team-block">
+          <img class="team-logo" src="{{ match.away_logo_url }}" alt="{{ match.away_team }}" onerror="this.src='https://upload.wikimedia.org/wikipedia/commons/d/d3/Soccerball.svg'">
+          <div class="team-name">{{ match.away_team }}</div>
+        </div>
+      </div>
+      <div class="match-meta">{{ match.league }} · {{ match.kickoff }}</div>
+    </div>
+
+    {% if match.pred %}
+    {% set p = match.pred %}
+    <!-- Prediction Cards -->
+    <div class="pred-summary">
+      {% for outcome, label, model_p, mkt_p, odds_v, ev_v, is_val in [
+          ('H', 'Home Win', p.h, p.mkt_h, match.b365h, p.ev_h, p.val_h),
+          ('D', 'Draw',     p.d, p.mkt_d, match.b365d, p.ev_d, p.val_d),
+          ('A', 'Away Win', p.a, p.mkt_a, match.b365a, p.ev_a, p.val_a),
+      ] %}
+      <div class="pred-card {% if p.label == outcome %}winner{% endif %}">
+        <div class="outcome">{{ label }}</div>
+        <div class="prob">{{ model_p }}%</div>
+        <div class="mkt">Market {{ mkt_p }}%</div>
+        <div class="odds-val">{{ odds_v }}</div>
+        <div class="ev-badge {% if ev_v >= 0 %}ev-pos{% else %}ev-neg{% endif %}">
+          EV {% if ev_v > 0 %}+{% endif %}{{ ev_v }}%
+        </div>
+        {% if is_val %}<div class="val-flag">↑ Value</div>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    <div style="text-align:center; margin-bottom:24px;">
+      Confidence: <span class="conf-badge conf-{{ p.confidence }}">{{ p.confidence }}</span>
+    </div>
+    {% endif %}
+
+    <!-- Key Feature Comparison -->
+    <div class="section">
+      <h3>Key Metrics</h3>
+      {% set hf = match.home_features %}
+      {% set af = match.away_features %}
+      {% set comparisons = [
+          ('Elo Rating', hf.elo, af.elo, '.0f'),
+          ('Form Pts/G (last 5)', hf.form_pts, af.form_pts, '.2f'),
+          ('Goals Scored/G', hf.gspg, af.gspg, '.2f'),
+          ('Goals Conceded/G', hf.gcpg, af.gcpg, '.2f'),
+          ('Season PPG', hf.season_ppg, af.season_ppg, '.2f'),
+          ('Season GD', hf.season_gd, af.season_gd, '.1f'),
+          ('Venue Form Pts', hf.venue_form_pts, af.venue_form_pts, '.2f'),
+          ('Momentum', hf.momentum, af.momentum, '.2f'),
+      ] %}
+      <table class="feat-table">
+        <thead>
+          <tr>
+            <th>{{ match.home_team }}</th>
+            <th>Metric</th>
+            <th style="text-align:right">{{ match.away_team }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for label, hv, av, fmt in comparisons %}
+          {% set h_better = (label == 'Goals Conceded/G' and hv < av) or (label != 'Goals Conceded/G' and hv > av) %}
+          {% set a_better = (label == 'Goals Conceded/G' and av < hv) or (label != 'Goals Conceded/G' and av > hv) %}
+          <tr>
+            <td class="num {% if h_better %}home-better{% elif a_better %}neutral{% endif %}">
+              {{ ('{:' + fmt + '}').format(hv) }}
+            </td>
+            <td style="color:var(--muted);font-size:.78rem;">{{ label }}</td>
+            <td class="num {% if a_better %}away-better{% elif h_better %}neutral{% endif %}" style="text-align:right">
+              {{ ('{:' + fmt + '}').format(av) }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Full Feature Breakdown -->
+    <div class="section">
+      <h3>All Features</h3>
+      <table class="feat-table">
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th style="text-align:right">Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for k, v in match.features.items() %}
+          <tr>
+            <td style="color:var(--muted)">{{ k }}</td>
+            <td class="num">{{ '%.3f' | format(v | float) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- H2H -->
+    {% if h2h %}
+    <div class="section">
+      <h3>Head to Head</h3>
+      <div style="display:flex;gap:32px;">
+        <div>
+          <div style="font-size:1.6rem;font-weight:700;color:#2ea043">{{ (h2h.hw * 100) | round | int }}%</div>
+          <div style="font-size:0.75rem;color:var(--muted);margin-top:2px;">Home Win Rate</div>
+        </div>
+        <div>
+          <div style="font-size:1.6rem;font-weight:700;color:#d29922">{{ (h2h.dr * 100) | round | int }}%</div>
+          <div style="font-size:0.75rem;color:var(--muted);margin-top:2px;">Draw Rate</div>
+        </div>
+        <div>
+          <div style="font-size:1.6rem;font-weight:700;color:#da3633">{{ ((1 - h2h.hw - h2h.dr) * 100) | round | int }}%</div>
+          <div style="font-size:0.75rem;color:var(--muted);margin-top:2px;">Away Win Rate</div>
+        </div>
+      </div>
+      <div style="font-size:0.78rem;color:var(--muted);margin-top:10px;">Based on last 10 meetings in training data</div>
+    </div>
+    {% endif %}
+  </div>
+</body>
+</html>

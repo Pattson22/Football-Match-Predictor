@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Best Bets · Football Predictor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0d1117; --surface: #161b22; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e; --accent: #238636;
+      --accent-border: #2ea043; --danger: #da3633; --warn: #d29922;
+      --ev-pos: #2ea043; --ev-neg: #da3633;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    .topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 24px;
+              background: var(--surface); border-bottom: 1px solid var(--border); }
+    .topbar-left { display: flex; align-items: center; gap: 20px; }
+    .topbar h1 { font-size: 1rem; font-weight: 700; color: var(--text); }
+    .nav-links { display: flex; gap: 12px; }
+    .nav-link { font-size: 0.8rem; color: var(--muted); text-decoration: none; padding: 5px 10px;
+                border-radius: 6px; transition: background .2s; }
+    .nav-link:hover, .nav-link.active { background: rgba(255,255,255,.07); color: var(--text); }
+    .topbar-right { font-size: 0.78rem; color: var(--muted); }
+
+    .page { max-width: 900px; margin: 0 auto; padding: 32px 16px; }
+    .page-header { margin-bottom: 24px; }
+    .page-header h2 { font-size: 1.3rem; font-weight: 700; }
+    .page-header p { color: var(--muted); font-size: 0.85rem; margin-top: 4px; }
+
+    .empty { text-align: center; padding: 60px; color: var(--muted); }
+    .empty p { margin-top: 8px; font-size: 0.9rem; }
+
+    .bet-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+                margin-bottom: 14px; padding: 18px 20px; display: flex; align-items: center;
+                justify-content: space-between; gap: 16px; }
+    .bet-main { flex: 1; }
+    .bet-teams { font-size: 0.95rem; font-weight: 600; }
+    .bet-meta { font-size: 0.78rem; color: var(--muted); margin-top: 3px; }
+    .bet-outcome { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 0.8rem;
+                   font-weight: 600; margin-top: 8px; background: rgba(46,160,67,.15); color: var(--ev-pos);
+                   border: 1px solid rgba(46,160,67,.4); }
+    .outcome-D { background: rgba(210,153,34,.1); color: var(--warn); border-color: rgba(210,153,34,.4); }
+    .outcome-A { background: rgba(218,54,51,.1); color: var(--danger); border-color: rgba(218,54,51,.4); }
+
+    .bet-stats { display: flex; gap: 20px; align-items: center; }
+    .stat { text-align: center; }
+    .stat-val { font-size: 1.1rem; font-weight: 700; }
+    .stat-lbl { font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
+    .ev-pos { color: var(--ev-pos); }
+    .ev-neg { color: var(--ev-neg); }
+
+    .btn-log { padding: 8px 16px; border-radius: 8px; border: 1px solid var(--accent-border);
+               background: rgba(35,134,54,.2); color: var(--ev-pos); font-size: 0.8rem;
+               font-weight: 600; cursor: pointer; text-decoration: none; transition: background .2s; }
+    .btn-log:hover { background: rgba(35,134,54,.35); }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1>⚽ Football Predictor</h1>
+      <nav class="nav-links">
+        <a href="/dashboard" class="nav-link">Dashboard</a>
+        <a href="/best-bets" class="nav-link active">Best Bets</a>
+        <a href="/bets" class="nav-link">Bet Tracker</a>
+        <a href="/predictions" class="nav-link">Predictions</a>
+      </nav>
+    </div>
+    <div class="topbar-right">{{ user_email }} · Model {{ model_accuracy }}% CV</div>
+  </div>
+
+  <div class="page">
+    <div class="page-header">
+      <h2>Best Bets</h2>
+      <p>Value bets where model probability exceeds market-implied by ≥5pp — sorted by expected value</p>
+    </div>
+
+    {% if value_bets %}
+      {% for vb in value_bets %}
+      {% set m = vb.match %}
+      {% set p = m.pred %}
+      <div class="bet-card">
+        <div class="bet-main">
+          <div class="bet-teams">{{ m.home_team }} vs {{ m.away_team }}</div>
+          <div class="bet-meta">{{ m.league }} · {{ m.kickoff }}</div>
+          <span class="bet-outcome {% if vb.outcome == 'D' %}outcome-D{% elif vb.outcome == 'A' %}outcome-A{% endif %}">
+            {{ vb.label_text }}
+          </span>
+        </div>
+        <div class="bet-stats">
+          <div class="stat">
+            <div class="stat-val">{{ vb.odds }}</div>
+            <div class="stat-lbl">Odds</div>
+          </div>
+          <div class="stat">
+            <div class="stat-val">{{ vb.model_prob }}%</div>
+            <div class="stat-lbl">Model Prob</div>
+          </div>
+          <div class="stat">
+            <div class="stat-val {% if vb.ev > 0 %}ev-pos{% else %}ev-neg{% endif %}">
+              {% if vb.ev > 0 %}+{% endif %}{{ vb.ev }}%
+            </div>
+            <div class="stat-lbl">EV</div>
+          </div>
+        </div>
+        <a href="/bets?prefill_home={{ m.home_team | urlencode }}&prefill_away={{ m.away_team | urlencode }}&prefill_outcome={{ vb.outcome }}&prefill_odds={{ vb.odds }}&prefill_date={{ m.date }}&prefill_league={{ m.league | urlencode }}" class="btn-log">
+          Log Bet
+        </a>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="empty">
+        <div style="font-size:2rem">🔍</div>
+        <p>No value bets found right now.</p>
+        <p>Visit the dashboard to load today's fixtures, then come back.</p>
+      </div>
+    {% endif %}
+  </div>
+</body>
+</html>

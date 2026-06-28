@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bet Tracker · Football Predictor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0d1117; --surface: #161b22; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e; --accent: #238636;
+      --accent-border: #2ea043; --danger: #da3633; --warn: #d29922;
+      --ev-pos: #2ea043; --ev-neg: #da3633;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    .topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 24px;
+              background: var(--surface); border-bottom: 1px solid var(--border); }
+    .topbar-left { display: flex; align-items: center; gap: 20px; }
+    .topbar h1 { font-size: 1rem; font-weight: 700; }
+    .nav-links { display: flex; gap: 12px; }
+    .nav-link { font-size: 0.8rem; color: var(--muted); text-decoration: none; padding: 5px 10px;
+                border-radius: 6px; transition: background .2s; }
+    .nav-link:hover, .nav-link.active { background: rgba(255,255,255,.07); color: var(--text); }
+    .topbar-right { font-size: 0.78rem; color: var(--muted); }
+
+    .page { max-width: 960px; margin: 0 auto; padding: 32px 16px; }
+    .page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; }
+    .page-header h2 { font-size: 1.3rem; font-weight: 700; }
+    .page-header p { color: var(--muted); font-size: 0.85rem; margin-top: 4px; }
+
+    /* Stats row */
+    .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 28px; }
+    .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+                 padding: 16px 20px; }
+    .stat-card .val { font-size: 1.6rem; font-weight: 700; }
+    .stat-card .lbl { font-size: 0.75rem; color: var(--muted); margin-top: 4px; }
+    .pos { color: var(--ev-pos); }
+    .neg { color: var(--ev-neg); }
+
+    /* Flash messages */
+    .flash { padding: 10px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 0.85rem; }
+    .flash.info { background: rgba(35,134,54,.15); border: 1px solid var(--accent-border); color: var(--ev-pos); }
+    .flash.error { background: rgba(218,54,51,.12); border: 1px solid var(--danger); color: var(--danger); }
+
+    /* Add bet form */
+    .add-form { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+                padding: 20px 24px; margin-bottom: 28px; }
+    .add-form h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 16px; }
+    .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+    .form-group label { display: block; font-size: 0.72rem; color: var(--muted); margin-bottom: 5px; font-weight: 500; }
+    .form-group input, .form-group select {
+      width: 100%; padding: 8px 10px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--bg); color: var(--text);
+      font-size: 0.85rem; font-family: inherit; }
+    .form-group input:focus, .form-group select:focus { outline: none; border-color: var(--accent-border); }
+    .btn-add { margin-top: 16px; padding: 9px 20px; border-radius: 8px; border: 1px solid var(--accent-border);
+               background: rgba(35,134,54,.2); color: var(--ev-pos); font-size: 0.85rem; font-weight: 600;
+               cursor: pointer; transition: background .2s; }
+    .btn-add:hover { background: rgba(35,134,54,.35); }
+
+    /* Section headers */
+    .section-title { font-size: 0.85rem; font-weight: 600; color: var(--muted); text-transform: uppercase;
+                     letter-spacing: .06em; margin: 24px 0 12px; }
+
+    /* Bet table */
+    .bets-table { width: 100%; border-collapse: collapse; }
+    .bets-table th { text-align: left; font-size: 0.72rem; color: var(--muted); font-weight: 600;
+                     text-transform: uppercase; letter-spacing: .05em; padding: 8px 12px;
+                     border-bottom: 1px solid var(--border); }
+    .bets-table td { padding: 10px 12px; font-size: 0.85rem; border-bottom: 1px solid rgba(255,255,255,.05); }
+    .bets-table tr:last-child td { border-bottom: none; }
+
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; }
+    .badge-P { background: rgba(210,153,34,.1); color: var(--warn); border: 1px solid rgba(210,153,34,.4); }
+    .badge-W { background: rgba(46,160,67,.1); color: var(--ev-pos); border: 1px solid rgba(46,160,67,.4); }
+    .badge-L { background: rgba(218,54,51,.1); color: var(--ev-neg); border: 1px solid rgba(218,54,51,.4); }
+    .badge-V { background: rgba(139,148,158,.1); color: var(--muted); border: 1px solid rgba(139,148,158,.4); }
+    .badge-H { background: rgba(46,160,67,.1); color: var(--ev-pos); }
+    .badge-D { background: rgba(210,153,34,.1); color: var(--warn); }
+    .badge-A { background: rgba(218,54,51,.1); color: var(--ev-neg); }
+
+    .pnl-pos { color: var(--ev-pos); font-weight: 600; }
+    .pnl-neg { color: var(--ev-neg); font-weight: 600; }
+
+    .action-form { display: inline; }
+    .btn-settle { padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg);
+                  color: var(--text); font-size: 0.75rem; cursor: pointer; margin-right: 4px; transition: background .2s; }
+    .btn-settle:hover { background: var(--surface); }
+    .btn-win { border-color: var(--accent-border); color: var(--ev-pos); }
+    .btn-win:hover { background: rgba(46,160,67,.15); }
+    .btn-loss { border-color: var(--danger); color: var(--ev-neg); }
+    .btn-loss:hover { background: rgba(218,54,51,.12); }
+    .btn-delete { border-color: transparent; color: var(--muted); }
+    .btn-delete:hover { color: var(--ev-neg); border-color: var(--danger); }
+
+    .empty { color: var(--muted); font-size: 0.85rem; padding: 20px 12px; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1>⚽ Football Predictor</h1>
+      <nav class="nav-links">
+        <a href="/dashboard" class="nav-link">Dashboard</a>
+        <a href="/best-bets" class="nav-link">Best Bets</a>
+        <a href="/bets" class="nav-link active">Bet Tracker</a>
+        <a href="/predictions" class="nav-link">Predictions</a>
+      </nav>
+    </div>
+    <div class="topbar-right">{{ user_email }} · Model {{ model_accuracy }}% CV</div>
+  </div>
+
+  <div class="page">
+    <div class="page-header">
+      <div>
+        <h2>Bet Tracker</h2>
+        <p>Log and track your bets, P&amp;L and ROI</p>
+      </div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <!-- Stats -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="val {% if total_pnl > 0 %}pos{% elif total_pnl < 0 %}neg{% endif %}">
+          {% if total_pnl > 0 %}+{% endif %}£{{ total_pnl }}
+        </div>
+        <div class="lbl">Total P&amp;L</div>
+      </div>
+      <div class="stat-card">
+        <div class="val {% if roi > 0 %}pos{% elif roi < 0 %}neg{% endif %}">
+          {% if roi > 0 %}+{% endif %}{{ roi }}%
+        </div>
+        <div class="lbl">ROI</div>
+      </div>
+      <div class="stat-card">
+        <div class="val">{{ hit_rate }}%</div>
+        <div class="lbl">Hit Rate ({{ wins }}/{{ settled | length }})</div>
+      </div>
+      <div class="stat-card">
+        <div class="val">{{ bets | length }}</div>
+        <div class="lbl">Total Bets ({{ pending | length }} pending)</div>
+      </div>
+    </div>
+
+    <!-- Add Bet -->
+    <div class="add-form">
+      <h3>+ Log a Bet</h3>
+      <form method="POST" action="/bets/add">
+        <div class="form-grid">
+          <div class="form-group" style="grid-column: span 2">
+            <label>Match</label>
+            <select name="match_select" id="match_select" onchange="fillMatch(this)">
+              <option value="">— pick a match —</option>
+              {% for m in available_matches %}
+              <option value="{{ m.home_team }}|{{ m.away_team }}|{{ m.date }}|{{ m.league }}|{{ m.b365h }}|{{ m.b365d }}|{{ m.b365a }}">
+                {{ m.home_team }} vs {{ m.away_team }} ({{ m.date }})
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Date</label>
+            <input type="date" name="match_date" id="f_date" required>
+          </div>
+          <div class="form-group">
+            <label>Home Team</label>
+            <input type="text" name="home_team" id="f_home" required>
+          </div>
+          <div class="form-group">
+            <label>Away Team</label>
+            <input type="text" name="away_team" id="f_away" required>
+          </div>
+          <div class="form-group">
+            <label>League</label>
+            <input type="text" name="league" id="f_league">
+          </div>
+          <div class="form-group">
+            <label>Bet On</label>
+            <select name="bet_on" id="f_bet_on">
+              <option value="H">Home Win</option>
+              <option value="D">Draw</option>
+              <option value="A">Away Win</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Odds</label>
+            <input type="number" name="odds" id="f_odds" step="0.01" min="1.01" value="2.00" required>
+          </div>
+          <div class="form-group">
+            <label>Stake (£)</label>
+            <input type="number" name="stake" step="0.50" min="0.50" value="10.00" required>
+          </div>
+        </div>
+        <button type="submit" class="btn-add">Log Bet</button>
+      </form>
+    </div>
+
+    <!-- Pending Bets -->
+    {% if pending %}
+    <div class="section-title">Pending ({{ pending | length }})</div>
+    <table class="bets-table">
+      <thead>
+        <tr>
+          <th>Match</th>
+          <th>Date</th>
+          <th>Bet</th>
+          <th>Odds</th>
+          <th>Stake</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in pending %}
+        <tr>
+          <td>{{ b.home_team }} vs {{ b.away_team }}</td>
+          <td>{{ b.match_date }}</td>
+          <td><span class="badge badge-{{ b.bet_on }}">{{ {'H':'Home','D':'Draw','A':'Away'}[b.bet_on] }}</span></td>
+          <td>{{ b.odds }}</td>
+          <td>£{{ b.stake }}</td>
+          <td>
+            <form class="action-form" method="POST" action="/bets/{{ b.id }}/settle">
+              <input type="hidden" name="result" value="W">
+              <button type="submit" class="btn-settle btn-win">Win</button>
+            </form>
+            <form class="action-form" method="POST" action="/bets/{{ b.id }}/settle">
+              <input type="hidden" name="result" value="L">
+              <button type="submit" class="btn-settle btn-loss">Loss</button>
+            </form>
+            <form class="action-form" method="POST" action="/bets/{{ b.id }}/settle">
+              <input type="hidden" name="result" value="V">
+              <button type="submit" class="btn-settle">Void</button>
+            </form>
+            <form class="action-form" method="POST" action="/bets/{{ b.id }}/delete">
+              <button type="submit" class="btn-settle btn-delete" onclick="return confirm('Delete?')">✕</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    <!-- Settled Bets -->
+    {% if settled %}
+    <div class="section-title">Settled ({{ settled | length }})</div>
+    <table class="bets-table">
+      <thead>
+        <tr>
+          <th>Match</th>
+          <th>Date</th>
+          <th>Bet</th>
+          <th>Odds</th>
+          <th>Stake</th>
+          <th>Result</th>
+          <th>P&amp;L</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in settled %}
+        <tr>
+          <td>{{ b.home_team }} vs {{ b.away_team }}</td>
+          <td>{{ b.match_date }}</td>
+          <td><span class="badge badge-{{ b.bet_on }}">{{ {'H':'Home','D':'Draw','A':'Away'}[b.bet_on] }}</span></td>
+          <td>{{ b.odds }}</td>
+          <td>£{{ b.stake }}</td>
+          <td><span class="badge badge-{{ b.status }}">{{ {'W':'Win','L':'Loss','V':'Void'}[b.status] }}</span></td>
+          <td class="{% if b.pnl > 0 %}pnl-pos{% elif b.pnl < 0 %}pnl-neg{% endif %}">
+            {% if b.pnl > 0 %}+{% endif %}£{{ b.pnl }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {% if not bets %}
+      <div class="empty">No bets logged yet. Use the form above to track your first bet.</div>
+    {% endif %}
+  </div>
+
+  <script>
+    // Pre-fill from URL params (coming from Best Bets "Log Bet" link)
+    const params = new URLSearchParams(location.search);
+    if (params.get('prefill_home')) {
+      document.getElementById('f_home').value  = params.get('prefill_home') || '';
+      document.getElementById('f_away').value  = params.get('prefill_away') || '';
+      document.getElementById('f_date').value  = params.get('prefill_date') || '';
+      document.getElementById('f_league').value = params.get('prefill_league') || '';
+      document.getElementById('f_odds').value  = params.get('prefill_odds') || '';
+      const outcome = params.get('prefill_outcome') || 'H';
+      document.getElementById('f_bet_on').value = outcome;
+    }
+
+    function fillMatch(sel) {
+      if (!sel.value) return;
+      const [home, away, date, league, oh, od, oa] = sel.value.split('|');
+      document.getElementById('f_home').value   = home;
+      document.getElementById('f_away').value   = away;
+      document.getElementById('f_date').value   = date;
+      document.getElementById('f_league').value = league;
+      // Default odds to home odds; user can override
+      document.getElementById('f_odds').value   = oh;
+    }
+  </script>
+</body>
+</html>

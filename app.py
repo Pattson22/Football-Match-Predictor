@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, render_template, redirect, url_for, f
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
+from dotenv import load_dotenv
 import joblib
 import numpy as np
 import requests
@@ -10,10 +11,12 @@ import json
 import time
 from datetime import datetime, timezone
 
+load_dotenv()
+
 # --- App Setup ---
 app = Flask(__name__)
 base_dir = os.path.abspath(os.path.dirname(__file__))
-app.config['SECRET_KEY'] = 'a_very_secret_random_key_f0r_y0ur_app'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'fallback_dev_key')
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(base_dir, 'project.db')
 
 db = SQLAlchemy(app)
@@ -28,28 +31,55 @@ class User(UserMixin, db.Model):
     email         = db.Column(db.String(100), unique=True, nullable=False)
     password_hash = db.Column(db.String(200), nullable=False)
 
+
+class Bet(db.Model):
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    match_date = db.Column(db.String(10))
+    home_team  = db.Column(db.String(80))
+    away_team  = db.Column(db.String(80))
+    league     = db.Column(db.String(80))
+    bet_on     = db.Column(db.String(1))    # H, D, A
+    odds       = db.Column(db.Float)
+    stake      = db.Column(db.Float)
+    status     = db.Column(db.String(1), default='P')  # P=pending, W=win, L=loss, V=void
+    pnl        = db.Column(db.Float, default=0.0)
+
+
+class PredictionLog(db.Model):
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    logged_at  = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    match_date = db.Column(db.String(10))
+    home_team  = db.Column(db.String(80))
+    away_team  = db.Column(db.String(80))
+    league     = db.Column(db.String(80))
+    pred_label = db.Column(db.String(1))    # H, D, A
+    pred_prob  = db.Column(db.Integer)      # 0-100
+    actual     = db.Column(db.String(1), nullable=True)
+
+
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
 
 # --- Configuration ---
-ODDS_API_KEY          = 'bc0d5e8a00938552e43b8552e8754c37'
-FOOTBALL_DATA_API_KEY = '3dc1c0e11343405d9e8ae546d67639c6'
+ODDS_API_KEY          = os.environ.get('ODDS_API_KEY', '')
+FOOTBALL_DATA_API_KEY = os.environ.get('FOOTBALL_DATA_API_KEY', '')
 REGIONS               = 'eu'
 ODDS_FORMAT           = 'decimal'
 
-# Each entry: (odds-api sport key, football-data.org competition code)
 LEAGUES = [
     ('soccer_epl',                'PL'),
     ('soccer_efl_champ',          'ELC'),
     ('soccer_italy_serie_a',      'SA'),
-    ('soccer_spain_la_liga',      'PD'),        # activates when La Liga season starts
-    ('soccer_germany_bundesliga', 'BL1'),       # activates when Bundesliga season starts
-    ('soccer_france_ligue_1',     'FL1'),       # activates when Ligue 1 season starts
+    ('soccer_spain_la_liga',      'PD'),
+    ('soccer_germany_bundesliga', 'BL1'),
+    ('soccer_france_ligue_1',     'FL1'),
 ]
 
-# League averages used as fallbacks when data is missing
 FALLBACK = {
     'form_pts':      1.2,
     'gspg':          1.35,
@@ -67,7 +97,6 @@ FALLBACK = {
     'rest_days':     7.0,
 }
 
-# The Odds API uses full club names; historical CSVs use short forms.
 API_TO_DATA_NAME = {
     'Manchester City':         'Man City',
     'Manchester United':       'Man United',
@@ -83,21 +112,16 @@ API_TO_DATA_NAME = {
     'Ipswich Town':            'Ipswich',
 }
 
-# Maps Odds API team names to football-data.org shortNames where they differ.
 CREST_ALIASES = {
-    # Italian
     'Inter Milan':         'Inter',
     'Como':                'Como 1907',
     'Brighton and Hove Albion': 'Brighton & Hove Albion',
-    # German (ready for Bundesliga)
     'Bayern Munich':       'Bayern München',
     'Bayer Leverkusen':    'Bayer 04 Leverkusen',
     'RB Leipzig':          'RasenBallsport Leipzig',
-    # Spanish (ready for La Liga)
     'Atletico Madrid':     'Atlético de Madrid',
     'Real Betis':          'Real Betis Balompié',
     'Celta Vigo':          'Celta de Vigo',
-    # French (ready for Ligue 1)
     'Paris Saint Germain': 'PSG',
     'Marseille':           'Olympique de Marseille',
     'Lyon':                'Olympique Lyonnais',
@@ -176,12 +200,14 @@ try:
 except FileNotFoundError:
     print("Warning: h2h_cache.json not found. Run prepare_data.py.")
 
+# In-memory match cache for detail page (refreshed each dashboard load)
+_matches_cache: dict = {}  # key: "home||away" → match dict
 
-# --- Crests Cache (football-data.org) ---
+
+# --- Crests Cache ---
 _crests_cache: dict = {}
 
 def _register_crest(name: str, url: str) -> None:
-    """Add a team name → crest URL to the cache, including common variants."""
     if not name or not url:
         return
     _crests_cache[name] = url
@@ -197,11 +223,9 @@ def _register_crest(name: str, url: str) -> None:
 _CRESTS_FILE = os.path.join(base_dir, 'crests_cache.json')
 
 def fetch_crests() -> dict:
-    """Load crests from local cache file; fall back to football-data.org API if missing."""
     global _crests_cache
     if _crests_cache:
         return _crests_cache
-    # Fast path: load from pre-built file
     try:
         with open(_CRESTS_FILE) as f:
             _crests_cache = json.load(f)
@@ -209,11 +233,10 @@ def fetch_crests() -> dict:
         return _crests_cache
     except (FileNotFoundError, json.JSONDecodeError):
         pass
-    # Slow path: fetch from API (rate-limited) and persist for next run
     comp_codes = [fd_code for _, fd_code in LEAGUES]
     for i, code in enumerate(comp_codes):
         if i > 0:
-            time.sleep(7)  # football-data.org free tier: 10 req/min
+            time.sleep(7)
         try:
             resp = requests.get(
                 f'https://api.football-data.org/v4/competitions/{code}/teams',
@@ -236,12 +259,11 @@ def fetch_crests() -> dict:
         print(f"Could not save crests file: {e}")
     return _crests_cache
 
-fetch_crests()  # pre-load at startup
+fetch_crests()
 
 
-# --- Known-team check (filters pre-season friendlies against lower-league opponents) ---
+# --- Known-team check ---
 def _is_known_team(api_name: str) -> bool:
-    """Return True if the team exists in any of our tracked data sources."""
     dn = normalise(api_name)
     stripped = api_name[:-3] if api_name.endswith(' FC') else api_name
     for name in {api_name, dn, stripped}:
@@ -250,7 +272,7 @@ def _is_known_team(api_name: str) -> bool:
     return False
 
 
-# --- Form Cache (football-data.org last-5 results) ---
+# --- Form Cache ---
 _form_cache: dict = {}
 _FORM_FILE = os.path.join(base_dir, 'form_cache.json')
 
@@ -258,7 +280,6 @@ def fetch_form() -> dict:
     global _form_cache
     if _form_cache:
         return _form_cache
-    # Fast path: load from pre-built file (refresh daily)
     try:
         if os.path.exists(_FORM_FILE) and (time.time() - os.path.getmtime(_FORM_FILE)) < 86400:
             with open(_FORM_FILE) as f:
@@ -314,7 +335,7 @@ def fetch_form() -> dict:
                                     'opp': opp_name, 'venue': 'H' if is_home else 'A'})
         except Exception as e:
             print(f"Could not fetch form for {comp_code}: {e}")
-        time.sleep(7)  # football-data.org free tier: 10 req/min
+        time.sleep(7)
     print(f"Form fetched for {len(_form_cache)} teams.")
     try:
         with open(_FORM_FILE, 'w') as f:
@@ -334,9 +355,9 @@ def get_team_form(name: str) -> list:
     return _form_cache.get(stripped, [])
 
 
-# --- Standings Cache (football-data.org, all tracked leagues) ---
+# --- Standings Cache ---
 _standings_cache = {'data': {}, 'ts': 0}
-CACHE_TTL = 3600  # seconds
+CACHE_TTL = 3600
 _STANDINGS_FILE       = os.path.join(base_dir, 'standings_cache.json')
 _LEAGUES_DISPLAY_FILE = os.path.join(base_dir, 'leagues_display.json')
 _leagues_display      = []
@@ -349,14 +370,12 @@ _FD_CODE_TO_NAME = {
 
 
 def fetch_standings():
-    """Fetch standings for all tracked leagues from football-data.org (cached for 1 hour)."""
     global _leagues_display
     if FOOTBALL_DATA_API_KEY.startswith('YOUR_'):
         return {}
     now = time.time()
     if now - _standings_cache['ts'] < CACHE_TTL and _standings_cache['data']:
         return _standings_cache['data']
-    # Fast path: load from file if fresh enough
     try:
         if os.path.exists(_STANDINGS_FILE) and (now - os.path.getmtime(_STANDINGS_FILE)) < CACHE_TTL:
             with open(_STANDINGS_FILE) as f:
@@ -371,13 +390,12 @@ def fetch_standings():
             return _standings_cache['data']
     except (json.JSONDecodeError, OSError):
         pass
-    # Slow path: fetch all leagues from API
     _leagues_display = []
     standings = {}
     comp_codes = [fd_code for _, fd_code in LEAGUES]
     for i, code in enumerate(comp_codes):
         if i > 0:
-            time.sleep(7)  # football-data.org free tier: 10 req/min
+            time.sleep(7)
         try:
             resp = requests.get(
                 f'https://api.football-data.org/v4/competitions/{code}/standings',
@@ -425,12 +443,11 @@ def fetch_standings():
     print(f"Standings refreshed — {len(standings)} teams across {len(comp_codes)} leagues.")
     return standings
 
-fetch_standings()  # pre-load at startup so dashboard is instant
+fetch_standings()
 
 
 # --- Helpers ---
 def format_kickoff(iso_str):
-    """Parse ISO-8601 UTC time from Odds API and return a readable local-ish string."""
     try:
         dt = datetime.fromisoformat(iso_str.replace('Z', '+00:00'))
         return dt.strftime('%a %d %b · %H:%M UTC')
@@ -440,34 +457,28 @@ def format_kickoff(iso_str):
 
 def get_logo_url(team_name):
     crests = _crests_cache
-    # Direct hit
     crest = crests.get(team_name)
     if crest:
         return crest
-    # Alias lookup (handles "Inter Milan" → "Inter" etc.)
     aliased = CREST_ALIASES.get(team_name)
     if aliased:
         crest = crests.get(aliased)
         if crest:
             return crest
-    # Normalised name (API → data name mapping)
     data_name = normalise(team_name)
     crest = crests.get(data_name)
     if crest:
         return crest
-    # Clearbit fallback
     domain = LOGO_MAP.get(team_name) or LOGO_MAP.get(data_name)
     return f'https://logo.clearbit.com/{domain}' if domain else \
            'https://upload.wikimedia.org/wikipedia/commons/d/d3/Soccerball.svg'
 
 
 def normalise(api_name):
-    """Map API full name to the short name used in our training data."""
     return API_TO_DATA_NAME.get(api_name, api_name)
 
 
 def _build_features(avg_H, avg_D, avg_A, hf, af, home_api_name='', away_api_name=''):
-    """Build the full feature dict that matches model_features order."""
     raw_h = 1.0 / avg_H
     raw_d = 1.0 / avg_D
     raw_a = 1.0 / avg_A
@@ -476,7 +487,6 @@ def _build_features(avg_H, avg_D, avg_A, hf, af, home_api_name='', away_api_name
     imp_D = round(raw_d / total, 4)
     imp_A = round(raw_a / total, 4)
 
-    # H2H lookup using normalised data names
     home_dn = normalise(API_TO_DATA_NAME.get(home_api_name, home_api_name))
     away_dn = normalise(API_TO_DATA_NAME.get(away_api_name, away_api_name))
     h2h = h2h_cache.get(f"{home_dn}||{away_dn}", {})
@@ -521,18 +531,15 @@ def _build_features(avg_H, avg_D, avg_A, hf, af, home_api_name='', away_api_name
 
 
 def get_team_features(api_name, standings, is_home=True):
-    """Collect all per-team features for live prediction."""
     data_name = normalise(api_name)
 
     form = team_form.get(data_name) or team_form.get(api_name) or {}
     elo  = team_elo.get(data_name)  or team_elo.get(api_name)  or FALLBACK['elo']
 
-    # Prefer live standings; fall back to cached form data
     standing = standings.get(api_name) or standings.get(data_name) or {}
     ppg = standing.get('ppg', FALLBACK['season_ppg'])
     gd  = standing.get('gd',  FALLBACK['season_gd'])
 
-    # Venue-split form: use home record when playing at home, away when away
     if is_home:
         venue_form_pts = form.get('home_form_pts', FALLBACK['home_form_pts'])
         venue_gspg     = form.get('home_gspg',     FALLBACK['home_gspg'])
@@ -561,7 +568,6 @@ def get_team_features(api_name, standings, is_home=True):
 
 
 def compute_avg_odds(bookmakers, home_team, away_team):
-    """Average home/draw/away prices across all returned bookmakers."""
     h, d, a = [], [], []
     for bookie in bookmakers:
         for market in bookie.get('markets', []):
@@ -625,7 +631,7 @@ def logout():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    global _odds_refreshed_at
+    global _odds_refreshed_at, _matches_cache
     upcoming_matches, api_error = [], None
     standings = fetch_standings()
 
@@ -659,7 +665,6 @@ def dashboard():
             if not all([avg_H, avg_D, avg_A]):
                 continue
 
-            # Skip pre-season friendlies: at least one team is unknown to all our data sources
             if not _is_known_team(home_team) or not _is_known_team(away_team):
                 continue
 
@@ -678,13 +683,16 @@ def dashboard():
                 "away_form": get_team_form(away_team),
                 "b365h": avg_H, "b365d": avg_D, "b365a": avg_A,
                 "features": _build_features(avg_H, avg_D, avg_A, hf, af, home_team, away_team),
+                "home_features": hf,
+                "away_features": af,
             })
 
     except requests.exceptions.RequestException as e:
         api_error = f"Error fetching odds: {e}"
         print(api_error)
 
-    # Pre-compute predictions for all matches so the UI can show them inline
+    # Pre-compute predictions + cache matches for detail page
+    _matches_cache = {}
     if model and model_features:
         for m in upcoming_matches:
             try:
@@ -712,6 +720,32 @@ def dashboard():
             except Exception:
                 m['pred'] = None
 
+            _matches_cache[f"{m['home_team']}||{m['away_team']}"] = m
+
+    # Auto-log predictions for current user (skip duplicates for same match_date+teams)
+    if model and model_features:
+        with app.app_context():
+            for m in upcoming_matches:
+                if not m.get('pred'):
+                    continue
+                exists = PredictionLog.query.filter_by(
+                    user_id=current_user.id,
+                    match_date=m['date'],
+                    home_team=m['home_team'],
+                    away_team=m['away_team'],
+                ).first()
+                if not exists:
+                    db.session.add(PredictionLog(
+                        user_id    = current_user.id,
+                        match_date = m['date'],
+                        home_team  = m['home_team'],
+                        away_team  = m['away_team'],
+                        league     = m['league'],
+                        pred_label = m['pred']['label'],
+                        pred_prob  = m['pred']['best_prob'],
+                    ))
+            db.session.commit()
+
     dates = sorted(set(m['date'] for m in upcoming_matches if m.get('date')))
 
     refreshed_str = _odds_refreshed_at.strftime('%H:%M UTC') if _odds_refreshed_at else None
@@ -725,7 +759,168 @@ def dashboard():
                            odds_refreshed_at=refreshed_str)
 
 
-# --- Predict ---
+# --- Best Bets ---
+@app.route('/best-bets')
+@login_required
+def best_bets():
+    matches = list(_matches_cache.values())
+    value_bets = []
+    for m in matches:
+        if not m.get('pred'):
+            continue
+        p = m['pred']
+        for outcome, label in [('val_h', 'H'), ('val_d', 'D'), ('val_a', 'A')]:
+            if p.get(outcome):
+                ev_key = f"ev_{label.lower()}"
+                odds_key = {'H': 'b365h', 'D': 'b365d', 'A': 'b365a'}[label]
+                prob_key = {'H': 'h', 'D': 'd', 'A': 'a'}[label]
+                value_bets.append({
+                    'match':      m,
+                    'outcome':    label,
+                    'label_text': {'H': 'Home Win', 'D': 'Draw', 'A': 'Away Win'}[label],
+                    'odds':       m[odds_key],
+                    'model_prob': p[prob_key],
+                    'ev':         p[ev_key],
+                })
+    value_bets.sort(key=lambda x: x['ev'], reverse=True)
+    return render_template('best_bets.html',
+                           value_bets=value_bets,
+                           user_email=current_user.email,
+                           model_accuracy=model_accuracy)
+
+
+# --- Match Detail ---
+@app.route('/match/<path:home>/<path:away>')
+@login_required
+def match_detail(home, away):
+    m = _matches_cache.get(f"{home}||{away}")
+    if not m:
+        flash('Match not found. Return to dashboard to refresh.', 'info')
+        return redirect(url_for('dashboard'))
+
+    # Build H2H history from cache
+    home_dn = normalise(home)
+    away_dn = normalise(away)
+    h2h_key = f"{home_dn}||{away_dn}"
+    h2h_data = h2h_cache.get(h2h_key, {})
+
+    return render_template('match_detail.html',
+                           match=m,
+                           h2h=h2h_data,
+                           user_email=current_user.email,
+                           model_accuracy=model_accuracy)
+
+
+# --- Betting Tracker ---
+@app.route('/bets')
+@login_required
+def bets():
+    user_bets = Bet.query.filter_by(user_id=current_user.id).order_by(Bet.created_at.desc()).all()
+    settled   = [b for b in user_bets if b.status != 'P']
+    pending   = [b for b in user_bets if b.status == 'P']
+
+    total_staked = sum(b.stake for b in settled)
+    total_pnl    = sum(b.pnl for b in settled)
+    wins         = sum(1 for b in settled if b.status == 'W')
+    hit_rate     = round(wins / len(settled) * 100) if settled else 0
+    roi          = round(total_pnl / total_staked * 100, 1) if total_staked else 0
+
+    # Pass available matches from cache for the add-bet form
+    available_matches = list(_matches_cache.values())
+
+    return render_template('bets.html',
+                           bets=user_bets,
+                           pending=pending,
+                           settled=settled,
+                           total_staked=round(total_staked, 2),
+                           total_pnl=round(total_pnl, 2),
+                           wins=wins,
+                           hit_rate=hit_rate,
+                           roi=roi,
+                           available_matches=available_matches,
+                           user_email=current_user.email,
+                           model_accuracy=model_accuracy)
+
+
+@app.route('/bets/add', methods=['POST'])
+@login_required
+def bets_add():
+    try:
+        bet = Bet(
+            user_id    = current_user.id,
+            match_date = request.form.get('match_date', ''),
+            home_team  = request.form.get('home_team', ''),
+            away_team  = request.form.get('away_team', ''),
+            league     = request.form.get('league', ''),
+            bet_on     = request.form.get('bet_on', 'H'),
+            odds       = float(request.form.get('odds', 2.0)),
+            stake      = float(request.form.get('stake', 10.0)),
+        )
+        db.session.add(bet)
+        db.session.commit()
+        flash('Bet logged.', 'info')
+    except Exception as e:
+        flash(f'Error logging bet: {e}', 'error')
+    return redirect(url_for('bets'))
+
+
+@app.route('/bets/<int:bet_id>/settle', methods=['POST'])
+@login_required
+def bets_settle(bet_id):
+    bet = Bet.query.filter_by(id=bet_id, user_id=current_user.id).first_or_404()
+    result = request.form.get('result', 'V')
+    bet.status = result
+    if result == 'W':
+        bet.pnl = round(bet.stake * bet.odds - bet.stake, 2)
+    elif result == 'L':
+        bet.pnl = -bet.stake
+    else:
+        bet.pnl = 0.0
+    db.session.commit()
+    flash(f'Bet settled as {"Win" if result == "W" else "Loss" if result == "L" else "Void"}.', 'info')
+    return redirect(url_for('bets'))
+
+
+@app.route('/bets/<int:bet_id>/delete', methods=['POST'])
+@login_required
+def bets_delete(bet_id):
+    bet = Bet.query.filter_by(id=bet_id, user_id=current_user.id).first_or_404()
+    db.session.delete(bet)
+    db.session.commit()
+    flash('Bet deleted.', 'info')
+    return redirect(url_for('bets'))
+
+
+# --- Predictions Tracker ---
+@app.route('/predictions')
+@login_required
+def predictions():
+    logs = PredictionLog.query.filter_by(user_id=current_user.id)\
+                              .order_by(PredictionLog.logged_at.desc()).all()
+    settled = [p for p in logs if p.actual is not None]
+    correct = sum(1 for p in settled if p.pred_label == p.actual)
+    accuracy = round(correct / len(settled) * 100, 1) if settled else None
+
+    return render_template('predictions.html',
+                           logs=logs,
+                           settled=settled,
+                           correct=correct,
+                           accuracy=accuracy,
+                           user_email=current_user.email,
+                           model_accuracy=model_accuracy)
+
+
+@app.route('/predictions/<int:log_id>/settle', methods=['POST'])
+@login_required
+def predictions_settle(log_id):
+    log = PredictionLog.query.filter_by(id=log_id, user_id=current_user.id).first_or_404()
+    log.actual = request.form.get('actual', '')
+    db.session.commit()
+    flash('Result recorded.', 'info')
+    return redirect(url_for('predictions'))
+
+
+# --- Predict (AJAX fallback) ---
 @app.route('/predict', methods=['POST'])
 @login_required
 def predict_match():
