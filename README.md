@@ -48,7 +48,7 @@ FOOTBALL_DATA_API_KEY = 'your_football_data_key_here'
 python prepare_data.py
 ```
 
-Processes the 120 historical CSV files in `my_football_data/` and outputs:
+Processes the 137 historical CSV files in `my_football_data/` and outputs:
 - `processed_football_data.csv` — feature matrix for training
 - `team_elo.json`, `team_form.json`, `h2h_cache.json` — lookup caches
 
@@ -82,7 +82,7 @@ football-predictor/
 ├── templates/
 │   └── index.html          # Dashboard UI
 ├── static/                 # Static assets
-├── my_football_data/       # 120 historical CSVs (E0, I1, SP1, D1, F1)
+├── my_football_data/       # 137 historical CSVs (E0, E1, I1, SP1, D1, F1)
 └── .gitignore
 ```
 
@@ -102,4 +102,4 @@ The model uses 35 features per fixture:
 | Rest | Days since last match (home and away) |
 | H2H | Home win rate, draw rate (last 10 meetings) |
 
-Cross-validation accuracy: **~52–53%** (3-class: home win / draw / away win).
+Cross-validation accuracy: **~51%** (3-class: home win / draw / away win).
